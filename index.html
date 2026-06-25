@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Image Processing Lab v1.0</title>
+<title>Keratoconus Optical Simulator v2.0</title>
 
 <style>
 *{
@@ -24,8 +24,16 @@ body{
 }
 
 h1{
-    margin:12px 0 18px;
-    font-size:28px;
+    margin:12px 0 4px;
+    font-size:24px;
+    text-align:center;
+}
+
+h2{
+    font-size:14px;
+    font-weight:normal;
+    color:#aaa;
+    margin-bottom:18px;
     text-align:center;
 }
 
@@ -93,7 +101,8 @@ input[type=range]{
 
 <body>
 
-<h1>Image Processing Lab v1.0</h1>
+<h1>Keratoconus Optical Simulator v2.0</h1>
+<h2>Aberración de Coma Asimétrica Inferior</h2>
 
 <div id="container">
     <video id="video" autoplay playsinline muted></video>
@@ -106,18 +115,18 @@ input[type=range]{
 
     <div class="control">
         <label>
-            <span>Desplazamiento Vertical</span>
-            <span id="offsetValue">20 px</span>
+            <span>Desplazamiento Vertical (Coma)</span>
+            <span id="offsetValue">35 px</span>
         </label>
-        <input id="offset" type="range" min="0" max="60" value="20">
+        <input id="offset" type="range" min="0" max="80" value="35">
     </div>
 
     <div class="control">
         <label>
-            <span>Opacidad</span>
-            <span id="opacityValue">60%</span>
+            <span>Opacidad del Fantasma</span>
+            <span id="opacityValue">45%</span>
         </label>
-        <input id="opacity" type="range" min="0" max="100" value="60">
+        <input id="opacity" type="range" min="0" max="100" value="45">
     </div>
 
 </div>
@@ -198,24 +207,55 @@ function render(){
 
     const w=canvas.width;
     const h=canvas.height;
-    const half=h/2;
 
+    // Duplicación progresiva y asimétrica para simular la aberración de coma corneal inferior
     ctx.save();
-
-    ctx.filter="blur(6px)";
+    
+    // Configuración óptica inicial del clon monocular
+    ctx.filter="blur(12px)";
     ctx.globalAlpha=opacity.value/100;
 
-    ctx.drawImage(
-        video,
-        0,
-        half,
-        w,
-        half,
-        0,
-        half-Number(offset.value),
-        w,
-        half
-    );
+    // Máscara de gradiente lineal para eliminar cortes artificiales e integrar el cono corneal de forma anatómica
+    // El cono ectásico comienza sutilmente en el centro del eje visual y se intensifica en el sector inferior
+    const gradient = ctx.createLinearGradient(0, h * 0.4, 0, h);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.4)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 1)');
+    
+    ctx.fillStyle = gradient;
+
+    // Muestreo dinámico multipaso para estirar la imagen verticalmente imitando la "cola de cometa" de la aberración de coma
+    const steps = 8;
+    const maxOffset = Number(offset.value);
+
+    for (let i = 1; i <= steps; i++) {
+        const factor = i / steps;
+        const currentOffset = maxOffset * factor;
+        
+        // La opacidad decae exponencialmente hacia la punta de la aberración vertical (hacia arriba)
+        ctx.globalAlpha = (opacity.value / 100) * (1 - factor * 0.5) / steps;
+        
+        ctx.save();
+        // Aplicar la máscara de degradado anatómico
+        ctx.beginPath();
+        ctx.rect(0, 0, w, h);
+        ctx.clip();
+        
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Estiramiento y desplazamiento asimétrico de la mitad inferior hacia la zona superior del campo visual
+        ctx.drawImage(
+            video,
+            0, 0, w, h,
+            0, -currentOffset, w, h + currentOffset
+        );
+        ctx.restore();
+    }
+
+    // Aplicación final del degradado de intensidad sobre el canvas procesado
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
 
     ctx.restore();
 
