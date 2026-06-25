@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Keratoconus Optical Simulator v2.0</title>
+<title>Keratoconus Optical Simulator v2.1</title>
 
 <style>
 *{
@@ -101,7 +101,7 @@ input[type=range]{
 
 <body>
 
-<h1>Keratoconus Optical Simulator v2.0</h1>
+<h1>Keratoconus Optical Simulator v2.1</h1>
 <h2>Aberración de Coma Asimétrica Inferior</h2>
 
 <div id="container">
@@ -136,6 +136,10 @@ input[type=range]{
 const video=document.getElementById("video");
 const canvas=document.getElementById("overlay");
 const ctx=canvas.getContext("2d");
+
+// Canvas auxiliar en memoria para realizar el procesamiento de la aberración sin alterar el renderizado principal
+const tempCanvas = document.createElement("canvas");
+const tempCtx = tempCanvas.getContext("2d");
 
 const offset=document.getElementById("offset");
 const opacity=document.getElementById("opacity");
@@ -192,6 +196,9 @@ video.addEventListener("loadedmetadata",()=>{
 
     canvas.width=video.videoWidth;
     canvas.height=video.videoHeight;
+    
+    tempCanvas.width=video.videoWidth;
+    tempCanvas.height=video.videoHeight;
 
     render();
 
@@ -203,62 +210,56 @@ function render(){
 
     if(video.readyState<2) return;
 
+    // Limpieza de capas
     ctx.clearRect(0,0,canvas.width,canvas.height);
+    tempCtx.clearRect(0,0,tempCanvas.width,tempCanvas.height);
 
     const w=canvas.width;
     const h=canvas.height;
-
-    // Duplicación progresiva y asimétrica para simular la aberración de coma corneal inferior
-    ctx.save();
-    
-    // Configuración óptica inicial del clon monocular
-    ctx.filter="blur(12px)";
-    ctx.globalAlpha=opacity.value/100;
-
-    // Máscara de gradiente lineal para eliminar cortes artificiales e integrar el cono corneal de forma anatómica
-    // El cono ectásico comienza sutilmente en el centro del eje visual y se intensifica en el sector inferior
-    const gradient = ctx.createLinearGradient(0, h * 0.4, 0, h);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.4)');
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 1)');
-    
-    ctx.fillStyle = gradient;
-
-    // Muestreo dinámico multipaso para estirar la imagen verticalmente imitando la "cola de cometa" de la aberración de coma
-    const steps = 8;
     const maxOffset = Number(offset.value);
 
+    // 1. Renderizar el efecto de Coma (cola de cometa vertical hacia arriba) en el lienzo temporal
+    tempCtx.save();
+    tempCtx.filter = "blur(12px)";
+    
+    const steps = 6;
     for (let i = 1; i <= steps; i++) {
         const factor = i / steps;
-        const currentOffset = maxOffset * factor;
+        // Simula la dispersión asimétrica del haz de luz
+        tempCtx.globalAlpha = (1 - factor * 0.4) / steps;
         
-        // La opacidad decae exponencialmente hacia la punta de la aberración vertical (hacia arriba)
-        ctx.globalAlpha = (opacity.value / 100) * (1 - factor * 0.5) / steps;
-        
-        ctx.save();
-        // Aplicar la máscara de degradado anatómico
-        ctx.beginPath();
-        ctx.rect(0, 0, w, h);
-        ctx.clip();
-        
-        ctx.globalCompositeOperation = 'source-over';
-        
-        // Estiramiento y desplazamiento asimétrico de la mitad inferior hacia la zona superior del campo visual
-        ctx.drawImage(
-            video,
-            0, 0, w, h,
-            0, -currentOffset, w, h + currentOffset
+        tempCtx.drawImage(
+            video, 
+            0, 0, w, h, 
+            0, -(maxOffset * factor), w, h
         );
-        ctx.restore();
     }
+    tempCtx.restore();
 
-    // Aplicación final del degradado de intensidad sobre el canvas procesado
+    // 2. Mezclar el efecto óptico en el canvas principal aplicando la máscara corneal inferior
+    ctx.save();
+    
+    // Dibujamos la aberración procesada
+    ctx.drawImage(tempCanvas, 0, 0);
+
+    // Aplicamos el gradiente para eliminar cortes horizontales (el cono inicia sutilmente en el centro y se intensifica abajo)
     ctx.globalCompositeOperation = 'destination-in';
+    
+    const gradient = ctx.createLinearGradient(0, h * 0.35, 0, h);
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.3)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
+    
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, w, h);
-
+    
     ctx.restore();
 
+    // 3. Aplicar opacidad general controlada por el usuario sobre el resultado final de la mezcla screen
+    ctx.save();
+    ctx.globalAlpha = opacity.value / 100;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
 }
 
 </script>
