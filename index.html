@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Keratoconus Optical Simulator v2.1</title>
+<title>Keratoconus Optical Simulator v2.3</title>
 
 <style>
 *{
@@ -101,7 +101,7 @@ input[type=range]{
 
 <body>
 
-<h1>Keratoconus Optical Simulator v2.1</h1>
+<h1>Keratoconus Optical Simulator v2.3</h1>
 <h2>Aberración de Coma Asimétrica Inferior</h2>
 
 <div id="container">
@@ -137,9 +137,9 @@ const video=document.getElementById("video");
 const canvas=document.getElementById("overlay");
 const ctx=canvas.getContext("2d");
 
-// Canvas auxiliar en memoria para realizar el procesamiento de la aberración sin alterar el renderizado principal
-const tempCanvas = document.createElement("canvas");
-const tempCtx = tempCanvas.getContext("2d");
+// Buffer en memoria independiente para construir la aberración de coma de forma segura
+const bufferCanvas = document.createElement("canvas");
+const bufferCtx = bufferCanvas.getContext("2d");
 
 const offset=document.getElementById("offset");
 const opacity=document.getElementById("opacity");
@@ -193,72 +193,71 @@ async function startCamera(){
 startBtn.addEventListener("click",startCamera);
 
 video.addEventListener("loadedmetadata",()=>{
-
     canvas.width=video.videoWidth;
     canvas.height=video.videoHeight;
     
-    tempCanvas.width=video.videoWidth;
-    tempCanvas.height=video.videoHeight;
-
+    // Sincronizar dimensiones del buffer
+    bufferCanvas.width=video.videoWidth;
+    bufferCanvas.height=video.videoHeight;
+    
     render();
-
 });
 
 function render(){
 
     requestAnimationFrame(render);
 
-    if(video.readyState<2) return;
+    if(video.readyState < 2) return;
 
-    // Limpieza de capas
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    tempCtx.clearRect(0,0,tempCanvas.width,tempCanvas.height);
-
-    const w=canvas.width;
-    const h=canvas.height;
+    const w = canvas.width;
+    const h = canvas.height;
     const maxOffset = Number(offset.value);
+    const userOpacity = Number(opacity.value) / 100;
 
-    // 1. Renderizar el efecto de Coma (cola de cometa vertical hacia arriba) en el lienzo temporal
-    tempCtx.save();
-    tempCtx.filter = "blur(12px)";
-    
+    // Limpieza estricta de ambos lienzos en cada frame
+    ctx.clearRect(0, 0, w, h);
+    bufferCtx.clearRect(0, 0, w, h);
+
+    if (userOpacity === 0 || maxOffset === 0) return;
+
+    // --- PASO 1: Construir la cola de cometa en el Buffer Oculto ---
+    bufferCtx.save();
+    bufferCtx.filter = "blur(12px)";
+
     const steps = 6;
     for (let i = 1; i <= steps; i++) {
         const factor = i / steps;
-        // Simula la dispersión asimétrica del haz de luz
-        tempCtx.globalAlpha = (1 - factor * 0.4) / steps;
+        const currentOffset = maxOffset * factor;
         
-        tempCtx.drawImage(
+        // Distribución asimétrica de la energía lumínica degradándose hacia la punta del cometa
+        bufferCtx.globalAlpha = (1 - factor * 0.4) / steps;
+        
+        bufferCtx.drawImage(
             video, 
             0, 0, w, h, 
-            0, -(maxOffset * factor), w, h
+            0, -currentOffset, w, h
         );
     }
-    tempCtx.restore();
+    bufferCtx.restore();
 
-    // 2. Mezclar el efecto óptico en el canvas principal aplicando la máscara corneal inferior
+    // --- PASO 2: Trasladar la aberración al Canvas Principal aplicando la máscara cónica ---
     ctx.save();
     
-    // Dibujamos la aberración procesada
-    ctx.drawImage(tempCanvas, 0, 0);
+    // Primero dibujamos la distorsión completa acumulada en el buffer
+    ctx.drawImage(bufferCanvas, 0, 0);
 
-    // Aplicamos el gradiente para eliminar cortes horizontales (el cono inicia sutilmente en el centro y se intensifica abajo)
+    // Cambiamos el modo de fusión para recortar suavemente de forma vertical
     ctx.globalCompositeOperation = 'destination-in';
     
+    // Gradiente lineal anatómico: 0% de efecto arriba del centro óptico, incremento progresivo hacia la base inferior
     const gradient = ctx.createLinearGradient(0, h * 0.35, 0, h);
     gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.3)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
+    gradient.addColorStop(0.4, `rgba(0, 0, 0, ${userOpacity * 0.3})`);
+    gradient.addColorStop(1, `rgba(0, 0, 0, ${userOpacity})`);
     
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, w, h);
     
-    ctx.restore();
-
-    // 3. Aplicar opacidad general controlada por el usuario sobre el resultado final de la mezcla screen
-    ctx.save();
-    ctx.globalAlpha = opacity.value / 100;
-    ctx.globalCompositeOperation = 'source-over';
     ctx.restore();
 }
 
